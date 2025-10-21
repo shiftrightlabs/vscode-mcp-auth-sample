@@ -6,6 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a reference implementation demonstrating OAuth 2.1 authentication for MCP (Model Context Protocol) servers in VS Code. The server implements a complete OAuth 2.0 Authorization Code Grant flow with PKCE (Proof Key for Code Exchange) using Azure AD as the identity provider.
 
+**Current Status:** ✅ WORKING with temporary workaround (see [AUTHENTICATION_STATUS.md](AUTHENTICATION_STATUS.md))
+- Authentication flow is functional
+- VS Code successfully authenticates users
+- MCP tools are accessible after authentication
+- ⚠️ JWT signature validation is temporarily disabled (see known issues below)
+
 ## Development Commands
 
 ### Build and Run
@@ -161,3 +167,40 @@ Modify `src/mcp/http-transport.ts:132-150` to change which MCP methods require a
 - Allow `initialize` without auth
 - Require auth for `tools/call` and `tools/list`
 - Allow other methods without auth
+
+## Known Issues
+
+### JWT Signature Validation Disabled (Temporary)
+
+**Issue:** The `jsonwebtoken` library reports "invalid signature" when validating VS Code's Microsoft Graph API tokens, even though the correct signing key is retrieved from Azure AD's JWKS endpoint.
+
+**Current Workaround:** Signature validation is disabled in [src/middleware/auth.ts:128-134](src/middleware/auth.ts#L128-L134)
+
+```typescript
+// TEMPORARY: Skip signature validation to test the rest of the flow
+console.log('⚠️  WARNING: Signature validation is DISABLED for debugging');
+const decoded = unverifiedToken?.payload as jwt.JwtPayload;
+```
+
+**What Still Works:**
+- ✅ Token format validation
+- ✅ Issuer validation (Azure AD tenant)
+- ✅ Expiration checking
+- ✅ Token decoding and parsing
+- ✅ User authentication and session management
+
+**What Doesn't Work:**
+- ❌ Cryptographic signature verification
+- ❌ Tamper detection
+- ❌ Token forgery protection
+
+**Root Cause Analysis:**
+VS Code sends Microsoft Graph API tokens (audience: `00000003-0000-0000-c000-000000000000`) obtained through its own authentication flow using VS Code's client ID (`aebc6443-996d-45c2-90f0-388ff96faa56`). These are valid Azure AD v1.0 tokens, but the signature validation fails for unknown reasons despite:
+- Correct JWKS key retrieval (key ID: `yEUwmXWL107Cc-7QZ2WSbeOb3sQ`)
+- Correct algorithm (RS256)
+- Correct issuer (`https://sts.windows.net/{tenant}/`)
+- Key confirmed to exist in JWKS endpoint
+
+**Next Steps:** See [AUTHENTICATION_STATUS.md](AUTHENTICATION_STATUS.md) for detailed investigation steps and alternative solutions.
+
+**Security Note:** ⚠️ Do NOT deploy to production with signature validation disabled. This creates a critical security vulnerability.

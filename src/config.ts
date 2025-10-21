@@ -12,8 +12,10 @@ export const config = {
     // Azure AD OAuth endpoints
     authorizeUrl: `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/oauth2/v2.0/authorize`,
     tokenUrl: `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/oauth2/v2.0/token`,
-    jwksUri: `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/discovery/v2.0/keys`,
-    issuer: `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/v2.0`,
+    // JWKS endpoint - use tenant-specific endpoint for v1.0 tokens
+    jwksUri: `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/discovery/keys`,
+    // v1.0 issuer for compatibility with VS Code tokens
+    issuer: `https://sts.windows.net/${process.env.AZURE_TENANT_ID}/`,
   },
 
   // Server Configuration
