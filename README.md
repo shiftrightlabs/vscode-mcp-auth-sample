@@ -321,7 +321,7 @@ Once authenticated, you can test the MCP tools through GitHub Copilot or any AI 
 
 #### **Tool: `get-user-info`**
 
-Returns authenticated user information from the access token and Graph API.
+Returns authenticated user information from access token and Microsoft Graph API.
 
 **Example prompts to trigger this tool:**
 - "Show me my authenticated user information"
@@ -354,7 +354,7 @@ Returns authenticated user information from the access token and Graph API.
 
 #### **Tool: `echo`**
 
-Simple echo tool that confirms authentication and repeats your message.
+Echoes a message back with authentication confirmation.
 
 **Example prompts to trigger this tool:**
 - "Echo this message: Hello, MCP!"
