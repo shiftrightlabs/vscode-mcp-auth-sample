@@ -110,7 +110,7 @@ export class MCPProtocolServer {
             ],
           };
 
-        case 'echo':
+        case 'echo': {
           const message = (args as any)?.message || '';
           return {
             content: [
@@ -120,8 +120,9 @@ export class MCPProtocolServer {
               },
             ],
           };
+        }
 
-        case 'calculate':
+        case 'calculate': {
           const { operation, a, b } = args as any;
           let result: number;
 
@@ -153,6 +154,7 @@ export class MCPProtocolServer {
               },
             ],
           };
+        }
 
         default:
           throw new Error(`Unknown tool: ${name}`);
