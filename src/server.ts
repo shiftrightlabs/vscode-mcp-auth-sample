@@ -3,7 +3,6 @@ import cors from 'cors';
 import { config, validateConfig } from './config';
 import { metadataRouter } from './metadata';
 import { oauthRouter } from './oauth';
-import { toolsRouter } from './mcp/tools';
 import { mcpRouter } from './mcp/http-transport';
 
 /**
@@ -43,168 +42,13 @@ async function startServer() {
     next();
   });
 
-  // Mount MCP protocol handler FIRST
-  // This handles / for MCP JSON-RPC and SSE requests from VS Code
-  app.use(mcpRouter);
-
-  // Documentation endpoint
-  app.get('/docs', (req, res) => {
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>MCP OAuth Sample - Documentation</title>
-          <style>
-            body {
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-              max-width: 900px;
-              margin: 50px auto;
-              padding: 0 20px;
-              line-height: 1.6;
-            }
-            h1 { color: #333; }
-            h2 { color: #666; margin-top: 30px; }
-            code {
-              background: #f4f4f4;
-              padding: 2px 6px;
-              border-radius: 3px;
-              font-family: monospace;
-            }
-            pre {
-              background: #f4f4f4;
-              padding: 15px;
-              border-radius: 5px;
-              overflow-x: auto;
-            }
-            .endpoint {
-              background: #e8f4f8;
-              padding: 10px;
-              margin: 10px 0;
-              border-left: 4px solid #0066cc;
-            }
-          </style>
-        </head>
-        <body>
-          <h1>MCP OAuth Sample Server</h1>
-          <p>This server demonstrates OAuth 2.0 authentication for MCP (Model Context Protocol) servers using Azure AD.</p>
-
-          <h2>Endpoints</h2>
-
-          <div class="endpoint">
-            <strong>GET /.well-known/oauth-protected-resource</strong><br>
-            OAuth 2.0 Protected Resource Metadata (RFC 9728)<br>
-            Public endpoint that provides metadata about this resource server.
-          </div>
-
-          <div class="endpoint">
-            <strong>GET /authorize</strong><br>
-            Initiates the OAuth 2.0 authorization flow.<br>
-            Redirects to Azure AD for user authentication.
-          </div>
-
-          <div class="endpoint">
-            <strong>GET /callback</strong><br>
-            OAuth callback endpoint.<br>
-            Receives authorization code and exchanges it for access token.
-          </div>
-
-          <div class="endpoint">
-            <strong>GET /tools/list</strong><br>
-            Lists available MCP tools.<br>
-            Public endpoint for tool discovery.
-          </div>
-
-          <div class="endpoint">
-            <strong>POST /tools/get-user-info</strong><br>
-            Returns authenticated user information.<br>
-            Requires: <code>Authorization: Bearer &lt;token&gt;</code>
-          </div>
-
-          <div class="endpoint">
-            <strong>POST /tools/echo</strong><br>
-            Echoes a message with user context.<br>
-            Requires: <code>Authorization: Bearer &lt;token&gt;</code><br>
-            Parameters: <code>{ "message": "string" }</code>
-          </div>
-
-          <div class="endpoint">
-            <strong>POST /tools/calculate</strong><br>
-            Performs mathematical calculations.<br>
-            Requires: <code>Authorization: Bearer &lt;token&gt;</code><br>
-            Parameters: <code>{ "operation": "add|subtract|multiply|divide", "a": number, "b": number }</code>
-          </div>
-
-          <h2>OAuth Flow</h2>
-          <ol>
-            <li>VS Code MCP client detects authentication requirement from <code>mcp.json</code></li>
-            <li>Client redirects user to <code>/authorize</code></li>
-            <li>Server redirects to Azure AD login page</li>
-            <li>User authenticates and grants permissions</li>
-            <li>Azure AD redirects back to <code>/callback</code> with authorization code</li>
-            <li>Server exchanges code for access token</li>
-            <li>Subsequent MCP tool requests include <code>Authorization: Bearer &lt;token&gt;</code> header</li>
-          </ol>
-
-          <h2>Testing with curl</h2>
-          <pre>
-# 1. Get OAuth metadata
-curl http://localhost:${config.server.port}/.well-known/oauth-protected-resource
-
-# 2. List available tools (no auth required)
-curl http://localhost:${config.server.port}/tools/list
-
-# 3. Try accessing protected endpoint without auth (should get 401)
-curl -X POST http://localhost:${config.server.port}/tools/get-user-info
-
-# 4. Access protected endpoint with token
-curl -X POST http://localhost:${config.server.port}/tools/get-user-info \\
-  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-          </pre>
-
-          <h2>VS Code Configuration</h2>
-          <p>Add this to your <code>mcp.json</code> file:</p>
-          <pre>
-{
-  "servers": {
-    "mcp-auth-sample": {
-      "type": "http",
-      "url": "http://localhost:${config.server.port}",
-      "authentication": {
-        "provider": "azure-ad",
-        "scopes": ["openid", "profile", "email"]
-      }
-    }
-  }
-}
-          </pre>
-
-          <h2>Security Implementation</h2>
-          <ul>
-            <li>✓ OAuth 2.1 compliant</li>
-            <li>✓ PKCE support (Proof Key for Code Exchange)</li>
-            <li>✓ JWT token validation with JWKS</li>
-            <li>✓ Audience verification (RFC 8707)</li>
-            <li>✓ Issuer verification</li>
-            <li>✓ WWW-Authenticate headers on 401 responses</li>
-            <li>✓ Secure token storage (production: use database)</li>
-            <li>✓ HTTPS enforcement (production)</li>
-          </ul>
-
-          <h2>Links</h2>
-          <ul>
-            <li><a href="https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization">MCP Authorization Spec</a></li>
-            <li><a href="https://code.visualstudio.com/api/extension-guides/ai/mcp#authorization">VS Code MCP Guide</a></li>
-            <li><a href="https://github.com/modelcontextprotocol">MCP GitHub</a></li>
-          </ul>
-        </body>
-      </html>
-    `);
-  });
-
-  // Mount other routers (MCP router already mounted above)
+  // Mount routers
   app.use(metadataRouter);  // /.well-known/oauth-protected-resource
   app.use(oauthRouter);     // /authorize, /callback
-  app.use(toolsRouter);     // /tools/*
+
+  // Mount MCP protocol handler LAST (it handles / and /mcp routes)
+  // This handles JSON-RPC and SSE requests from VS Code
+  app.use(mcpRouter);
 
   // 404 handler
   app.use((req, res) => {
@@ -214,15 +58,13 @@ curl -X POST http://localhost:${config.server.port}/tools/get-user-info \\
       availableEndpoints: [
         'POST / (MCP JSON-RPC)',
         'GET / (MCP SSE)',
+        'DELETE / (MCP Session)',
         'POST /mcp (MCP JSON-RPC)',
         'GET /mcp (MCP SSE)',
-        'GET /.well-known/oauth-protected-resource',
-        'GET /authorize',
-        'GET /callback',
-        'GET /tools/list',
-        'POST /tools/get-user-info',
-        'POST /tools/echo',
-        'POST /tools/calculate',
+        'DELETE /mcp (MCP Session)',
+        'GET /.well-known/oauth-protected-resource (OAuth metadata)',
+        'GET /authorize (OAuth flow)',
+        'GET /callback (OAuth callback)',
       ],
     });
   });
@@ -245,14 +87,15 @@ curl -X POST http://localhost:${config.server.port}/tools/get-user-info \\
     console.log('=================================================');
     console.log(`Server URL: ${config.server.url}`);
     console.log(`Port: ${port}`);
-    console.log(`\nEndpoints:`);
-    console.log(`  Home:        ${config.server.url}/`);
-    console.log(`  Docs:        ${config.server.url}/docs`);
+    console.log(`\nMCP Protocol Endpoints:`);
+    console.log(`  JSON-RPC:    POST ${config.server.url}/`);
+    console.log(`  SSE Stream:  GET  ${config.server.url}/`);
+    console.log(`  Session End: DELETE ${config.server.url}/`);
+    console.log(`\nOAuth Endpoints:`);
     console.log(`  Metadata:    ${config.server.url}/.well-known/oauth-protected-resource`);
     console.log(`  Authorize:   ${config.server.url}/authorize`);
     console.log(`  Callback:    ${config.server.url}/callback`);
-    console.log(`  Tools:       ${config.server.url}/tools/list`);
-    console.log(`\nOAuth Provider: Azure AD`);
+    console.log(`\nOAuth Provider: Azure AD (Public Client - PKCE)`);
     console.log(`  Tenant ID:   ${config.azure.tenantId}`);
     console.log(`  Client ID:   ${config.azure.clientId}`);
     console.log('=================================================\n');
