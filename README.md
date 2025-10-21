@@ -2,6 +2,7 @@
 
 > **A complete reference implementation showing how to build a secure MCP (Model Context Protocol) server with OAuth 2.1 authentication for VS Code.**
 
+[![CI](https://github.com/shiftrightlabs/vscode-mcp-auth-sample/actions/workflows/ci.yml/badge.svg)](https://github.com/shiftrightlabs/vscode-mcp-auth-sample/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## 🎯 What This Project Does
@@ -17,58 +18,56 @@ This project demonstrates how to build a production-ready **MCP server** that ru
 - ✅ Production-ready security patterns
 - ✅ TypeScript with full type safety
 
-**Deployment Model:** This server is designed to run locally (like `http://localhost:3000`). For remote server deployments, see the note in the "Public Client Authentication" section below.
+**Deployment Model:** This server is designed to run locally (like `http://localhost:3000`). For remote server deployments, see the "How We Implement OAuth" section below.
+
+**Important Note:** VS Code uses its own client ID when obtaining tokens, not your MCP server's client ID. This means you'll receive Microsoft Graph API tokens instead of tokens scoped to your application. See "Challenge #2" below for the full explanation and solution.
 
 ## 📖 The Story: How Everything Works Together
 
 ### The Challenge
 
-Building a production-ready MCP server with OAuth authentication is complex. While the MCP specification defines OAuth support, there are very few real-world examples showing how to implement it correctly. This project solves three major challenges that developers face:
+Building a production-ready MCP server with OAuth authentication that works with **VS Code** is complex. While the MCP specification defines OAuth support, there are very few real-world examples showing how to implement it for VS Code integration. VS Code's MCP client has specific behaviors (like using its own client ID) that aren't documented elsewhere. This project solves two major challenges that developers face when building OAuth-authenticated MCP servers for VS Code:
 
-#### 1. **Lack of OAuth + MCP Integration Examples**
+#### 1. **Lack of OAuth + MCP + VS Code Integration Examples**
 
-**The Problem:** The MCP specification includes OAuth support, but there are almost no complete, working examples showing how to implement it. Most documentation focuses on the protocol itself, not the OAuth integration.
+**The Problem:** While the MCP specification includes OAuth support, there are almost no complete, working examples showing how to implement OAuth-authenticated MCP servers that integrate with **VS Code**. Most documentation focuses on the MCP protocol itself or generic OAuth flows, but doesn't address:
+- How to handle VS Code's specific OAuth implementation
+- How VS Code's MCP client behaves during authentication
+- How to deal with VS Code using its own client ID (see Challenge #2)
+- How to validate the Microsoft Graph API tokens that VS Code sends
 
-**Our Solution:** This project provides a complete, production-ready reference implementation showing:
-- How to implement the OAuth 2.1 Authorization Code flow with PKCE
-- How to integrate OAuth metadata discovery (RFC 9728)
+**Our Solution:** This project provides a complete, production-ready reference implementation specifically for VS Code integration, showing:
+- How to implement the OAuth 2.1 Authorization Code flow with PKCE for VS Code
+- How to integrate OAuth metadata discovery (RFC 9728) that VS Code recognizes
 - How to protect MCP endpoints with Bearer token authentication
-- How to handle the complete authentication lifecycle
+- How to handle VS Code's client ID behavior and Graph API tokens
+- How to manage the complete authentication lifecycle with VS Code's MCP client
 
-#### 2. **Public Client Authentication (PKCE)**
+#### 2. **Microsoft Graph API Token Validation (The Biggest Surprise)**
 
-**The Problem:** This MCP server is designed to run **locally on the user's machine** (like `http://localhost:3000`). Since the server code runs on the user's machine, any client secret stored in the code would be accessible to the user. This makes traditional OAuth flows (which require a client secret) unsuitable for local deployments.
+**The Problem:** This is the most surprising challenge. You might expect that when VS Code authenticates users through your MCP server's OAuth flow, it would use **your MCP server's client ID** to obtain tokens. But that's not what happens.
 
-**Our Solution:** We implement **PKCE (Proof Key for Code Exchange)**, which provides cryptographic security without requiring a client secret:
+**The Surprise: VS Code Hijacks the Client ID**
 
+Instead, VS Code uses **its own client ID** (`aebc6443-996d-45c2-90f0-388ff96faa56`) to obtain tokens, completely ignoring your MCP server's registered client ID. This means:
+
+1. ✅ The OAuth flow uses your MCP server's authorization endpoint
+2. ✅ The user authenticates via your Azure AD tenant
+3. ❌ **But the access token is issued for VS Code's client ID, not yours**
+4. ❌ The token audience is **Microsoft Graph API** (`00000003-0000-0000-c000-000000000000`), not your MCP server
+
+When you decode the token, you'll see:
+```json
+{
+  "aud": "00000003-0000-0000-c000-000000000000",  // Microsoft Graph
+  "appid": "aebc6443-996d-45c2-90f0-388ff96faa56",  // VS Code's client ID
+  "scp": "User.Read openid profile email"          // Graph API scopes
+}
 ```
-User → VS Code → MCP Server → Azure AD
-                      ↓
-                 PKCE Challenge
-                      ↓
-                 Azure AD Login
-                      ↓
-               Authorization Code
-                      ↓
-            Exchange for Access Token
-```
 
-**Why PKCE?**
-- ✅ No client secret needed (safe for local deployment)
-- ✅ Secure for applications running on user machines (MCP servers, SPAs, mobile apps, desktop apps)
-- ✅ Cryptographic security via code challenge/verifier pair
-- ✅ Required by OAuth 2.1 specification for public clients
+**Why This Matters:**
 
-**Important Note:** If you're deploying an MCP server on a **remote, secure server** (not locally), you could use the traditional **Confidential Client flow** with a client secret instead of PKCE. The client secret would be safe because:
-- The server code isn't accessible to end users
-- The secret stays on your secure server
-- This is the same model used by traditional web applications
-
-This project uses PKCE because it's designed for **local deployment** where the code runs on the user's machine alongside VS Code.
-
-#### 3. **Microsoft Graph API Token Validation**
-
-**The Problem:** This is the most surprising challenge. When VS Code authenticates users, it obtains **Microsoft Graph API tokens** (audience: `00000003-0000-0000-c000-000000000000`). These tokens **cannot be validated using standard JWT signature validation** by third-party services - even with the correct JWKS signing keys from Azure AD. This is intentional by Microsoft to prevent Graph API tokens from being used with third-party services.
+These Microsoft Graph API tokens **cannot be validated using standard JWT signature validation** by third-party services - even with the correct JWKS signing keys from Azure AD. This is intentional by Microsoft to prevent Graph API tokens from being accepted by services other than Microsoft Graph.
 
 Most developers try the standard approach and get stuck:
 ```typescript
@@ -100,6 +99,38 @@ const response = await axios.get('https://graph.microsoft.com/v1.0/me', {
 - ✅ Catches expired or revoked tokens immediately
 - ✅ This is the **official Microsoft-recommended approach** for Graph API tokens
 - ✅ We cache validated tokens (5 min TTL) for performance
+
+---
+
+### How We Implement OAuth (PKCE for Local Deployment)
+
+Since this MCP server runs **locally on the user's machine** (like `http://localhost:3000`), we use **OAuth 2.1 with PKCE (Proof Key for Code Exchange)** instead of client secrets.
+
+**Why PKCE for Local Deployment:**
+
+When your server code runs on the user's machine, any client secret in the code would be accessible to users. PKCE solves this by using cryptographic challenge/response pairs instead of secrets:
+
+```
+User → VS Code → MCP Server → Azure AD
+                      ↓
+                 PKCE Challenge
+                      ↓
+                 Azure AD Login
+                      ↓
+               Authorization Code
+                      ↓
+            Exchange for Access Token
+```
+
+**PKCE Benefits:**
+- ✅ No client secret needed (safe for local deployment)
+- ✅ Cryptographic security via code challenge/verifier pair
+- ✅ Standard OAuth 2.1 for public clients
+- ✅ Same pattern used by mobile apps, SPAs, desktop apps
+
+**Alternative for Remote Servers:**
+
+If you're deploying an MCP server on a **remote, secure server** (not locally), you could use the traditional **Confidential Client flow** with a client secret instead. The secret would be safe because it stays on your secure server, not accessible to end users.
 
 ## 🏗️ Architecture
 
@@ -525,6 +556,44 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 - **Anthropic** - For the MCP specification and SDK
 - **Microsoft** - For Azure AD and Graph API documentation
 - **VS Code Team** - For MCP client implementation
+
+## ❓ Frequently Asked Questions
+
+**Q: Why do I need to register an Azure AD application if VS Code uses its own client ID?**
+
+A: Great question! Even though VS Code uses its own client ID to obtain the access token, you still need to register your own Azure AD application because:
+- Your MCP server's authorization endpoint (`/authorize`) needs a client ID for the OAuth flow
+- The tenant ID from your app registration determines which Azure AD tenant users authenticate against
+- Your redirect URI configuration (`http://localhost:3000/callback`) must match your app registration
+
+Think of it this way: Your app registration controls **which tenant** and **which redirect URIs** are allowed. VS Code then leverages that OAuth flow but substitutes its own client ID when requesting the token.
+
+**Q: Can I make VS Code use my MCP server's client ID instead of its own?**
+
+A: No, this is built into VS Code's MCP client implementation. VS Code always uses its own client ID (`aebc6443-996d-45c2-90f0-388ff96faa56`) when obtaining tokens. This is why you receive Microsoft Graph API tokens and must use Graph API introspection for validation.
+
+**Q: Why does VS Code do this?**
+
+A: This allows VS Code to obtain tokens with Microsoft Graph API scopes (like `User.Read`) that it can use for its own features, while still authenticating users through your MCP server's OAuth flow. It's a design decision in VS Code's MCP client implementation.
+
+**Q: Does this mean my client ID configuration is ignored?**
+
+A: Your `AZURE_CLIENT_ID` is still important! It's used for:
+- The OAuth metadata endpoint (`/.well-known/oauth-protected-resource`)
+- Configuring which Azure AD tenant to use (via tenant ID)
+- Setting up the redirect URI in Azure AD
+
+Even though the final access token uses VS Code's client ID, your configuration still controls the authentication flow.
+
+**Q: Is this a security issue?**
+
+A: No, this is by design. The tokens are still:
+- Issued by your Azure AD tenant (controlled by your tenant ID)
+- Validated via Microsoft Graph API (cryptographically secure)
+- Scoped to the authenticated user
+- Only usable for Microsoft Graph API calls (audience restriction)
+
+The Graph API introspection pattern we use is Microsoft's recommended approach for validating these tokens.
 
 ## 💬 Support
 
