@@ -548,23 +548,14 @@ This implementation follows:
 
 Contributions are welcome! This is an educational project to help developers understand MCP + OAuth integration.
 
-### Areas for Improvement
-
-- [ ] Add refresh token support
-- [ ] Implement persistent token storage (database)
-- [ ] Add rate limiting
-- [ ] Support multiple identity providers (Google, GitHub, etc.)
-- [ ] Add comprehensive test suite
-- [ ] Docker containerization
-- [ ] Kubernetes deployment example
-
 ### How to Contribute
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+1. Fork the repository at https://github.com/shiftrightlabs/vscode-mcp-auth-sample
+2. Clone your fork (`git clone https://github.com/YOUR-USERNAME/vscode-mcp-auth-sample.git`)
+3. Create a feature branch (`git checkout -b feature/amazing-feature`)
+4. Make your changes and commit (`git commit -m 'Add amazing feature'`)
+5. Push to your fork (`git push origin feature/amazing-feature`)
+6. Open a Pull Request at https://github.com/shiftrightlabs/vscode-mcp-auth-sample/pulls
 
 ## 📄 License
 
@@ -572,9 +563,8 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 ## 🙏 Acknowledgments
 
-- **Anthropic** - For the MCP specification and SDK
-- **Microsoft** - For Azure AD and Graph API documentation
-- **VS Code Team** - For MCP client implementation
+- **Anthropic** - For creating and maintaining the Model Context Protocol (MCP) specification and SDK
+- **Microsoft** - For Azure AD OAuth 2.0 platform and Microsoft Graph API documentation
 
 ## ❓ Frequently Asked Questions
 
