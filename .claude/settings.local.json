@@ -11,7 +11,16 @@
       "Bash(taskkill //F //PID 27808)",
       "Bash(taskkill //F //PID 39232)",
       "Bash(taskkill //F //PID 24348)",
-      "Bash(taskkill //F //PID 8184)"
+      "Bash(taskkill //F //PID 8184)",
+      "Bash(git commit:*)",
+      "Bash(taskkill:*)",
+      "Bash(del VSCODE_SETUP.md VSCODE_MCP_REALITY.md VSCODE_MCP_HTTP_OAUTH_SETUP.md VSCODE_QUICK_TEST.md SECURITY_UPGRADE_SUMMARY.md QUICKSTART.md NEXT_STEPS.md VSCODE_INTEGRATION.md MCP_SDK_COMPLIANCE.md IMPLEMENTATION_COMPLETE.md AZURE_PUBLIC_CLIENT_SETUP.md GRAPH_API_VALIDATION.md AUTHENTICATION_STATUS.md)",
+      "Bash(rm:*)",
+      "Bash(npm audit:*)",
+      "Bash(python:*)",
+      "Bash(npm install:*)",
+      "Bash(npx husky init)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []

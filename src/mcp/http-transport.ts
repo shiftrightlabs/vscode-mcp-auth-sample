@@ -1,6 +1,8 @@
 import { Request, Response, Router, NextFunction } from 'express';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
+import axios from 'axios';
+import jwt from 'jsonwebtoken';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
@@ -19,10 +21,16 @@ import { requireAuth } from '../middleware/auth.js';
 export const mcpRouter = Router();
 
 /**
+ * Store for request context (maps session ID to request)
+ * This allows tools to access the HTTP request and authorization header
+ */
+const requestContextStore = new Map<string, Request>();
+
+/**
  * Create a new MCP server instance with tools
  * This is called for each new transport/session
  */
-function createMCPServer(): McpServer {
+function createMCPServer(sessionId: string): McpServer {
   const server = new McpServer(
     {
       name: 'mcp-auth-sample',
@@ -38,31 +46,108 @@ function createMCPServer(): McpServer {
   // Register tools using the modern API
   server.tool(
     'get-user-info',
-    'Returns authenticated user information from the access token',
+    'Returns authenticated user information from access token and Microsoft Graph API',
     {}, // No input parameters
     async () => {
-      // In production, extract user info from validated JWT token
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              message: 'User authenticated via OAuth 2.0 PKCE',
-              user: {
-                name: 'Authenticated User',
-                email: 'user@example.com',
-              },
-              security: 'Public Client (no client secret)',
-            }, null, 2),
+      try {
+        // Extract the access token from the stored request context
+        const req = requestContextStore.get(sessionId);
+        const authHeader = req?.headers?.authorization;
+
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+          throw new Error('No access token found. Please authenticate first.');
+        }
+
+        const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+
+        // 1. Read claims from the JWT token (without verification)
+        const decoded = jwt.decode(token, { complete: true });
+        const payload = decoded?.payload as jwt.JwtPayload;
+
+        // 2. Call Microsoft Graph API to get user profile
+        const graphResponse = await axios.get('https://graph.microsoft.com/v1.0/me', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
           },
-        ],
-      };
+          timeout: 5000,
+        });
+
+        const graphUser = graphResponse.data;
+
+        // 3. Combine information from both sources
+        const result = {
+          title: '✅ Authenticated User Information',
+          authentication: {
+            method: 'OAuth 2.0 Authorization Code with PKCE',
+            client_type: 'Public Client (no client secret)',
+            token_validated: 'via Microsoft Graph API introspection',
+          },
+          token_claims: {
+            issuer: payload?.iss,
+            subject: payload?.sub,
+            audience: payload?.aud,
+            issued_at: payload?.iat ? new Date(payload.iat * 1000).toISOString() : null,
+            expires_at: payload?.exp ? new Date(payload.exp * 1000).toISOString() : null,
+            application_id: payload?.appid || payload?.azp,
+            scopes: payload?.scp?.split(' ') || [],
+          },
+          graph_api_user: {
+            id: graphUser.id,
+            displayName: graphUser.displayName,
+            givenName: graphUser.givenName,
+            surname: graphUser.surname,
+            userPrincipalName: graphUser.userPrincipalName,
+            mail: graphUser.mail,
+            jobTitle: graphUser.jobTitle,
+            officeLocation: graphUser.officeLocation,
+            mobilePhone: graphUser.mobilePhone,
+            businessPhones: graphUser.businessPhones,
+          },
+          demonstration: {
+            token_reading: '✅ Successfully read JWT claims from access token',
+            graph_api_access: '✅ Successfully called Microsoft Graph API',
+            security_validation: '✅ Token validated via Graph API introspection',
+          },
+        };
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        let errorMessage = 'Failed to get user information';
+        if (axios.isAxiosError(error)) {
+          if (error.response?.status === 401) {
+            errorMessage = 'Access token is invalid or expired. Please re-authenticate.';
+          } else {
+            errorMessage = `Graph API error: ${error.response?.status} ${error.response?.statusText}`;
+          }
+        } else if (error instanceof Error) {
+          errorMessage = error.message;
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                error: errorMessage,
+                details: error instanceof Error ? error.message : String(error),
+              }, null, 2),
+            },
+          ],
+        };
+      }
     }
   );
 
   server.tool(
     'echo',
-    'Echoes a message back with user context',
+    'Echoes a message back with authentication confirmation',
     {
       message: z.string().describe('The message to echo back'),
     },
@@ -72,46 +157,6 @@ function createMCPServer(): McpServer {
           {
             type: 'text',
             text: `Echo: ${message}\n\n✅ Authenticated via OAuth 2.0 PKCE (Public Client)`,
-          },
-        ],
-      };
-    }
-  );
-
-  server.tool(
-    'calculate',
-    'Performs a mathematical calculation',
-    {
-      operation: z.enum(['add', 'subtract', 'multiply', 'divide']).describe('The mathematical operation to perform'),
-      a: z.number().describe('First number'),
-      b: z.number().describe('Second number'),
-    },
-    async ({ operation, a, b }) => {
-      let result: number;
-
-      switch (operation) {
-        case 'add':
-          result = a + b;
-          break;
-        case 'subtract':
-          result = a - b;
-          break;
-        case 'multiply':
-          result = a * b;
-          break;
-        case 'divide':
-          if (b === 0) {
-            throw new Error('Division by zero');
-          }
-          result = a / b;
-          break;
-      }
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Result: ${a} ${operation} ${b} = ${result}\n\n✅ Calculated by authenticated MCP server`,
           },
         ],
       };
@@ -165,17 +210,22 @@ const handleMCPPost = async (req: Request, res: Response) => {
       // Reuse existing transport for this session
       console.log(`Reusing existing transport for session: ${sessionId}`);
       transport = transports[sessionId];
+
+      // Store the request context for this session (so tools can access auth headers)
+      requestContextStore.set(sessionId, req);
     } else if (!sessionId && isInitializeRequest(req.body)) {
       // New initialization request - create new transport
       console.log('Creating new transport for initialize request');
 
+      const newSessionId = randomUUID();
+
       transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => randomUUID(),
+        sessionIdGenerator: () => newSessionId,
         enableJsonResponse: true,
-        onsessioninitialized: (newSessionId) => {
+        onsessioninitialized: (sid) => {
           // Store the transport by session ID when initialized
-          console.log(`Session initialized with ID: ${newSessionId}`);
-          transports[newSessionId] = transport;
+          console.log(`Session initialized with ID: ${sid}`);
+          transports[sid] = transport;
         },
       });
 
@@ -185,11 +235,12 @@ const handleMCPPost = async (req: Request, res: Response) => {
         if (sid && transports[sid]) {
           console.log(`Transport closed for session ${sid}, cleaning up`);
           delete transports[sid];
+          requestContextStore.delete(sid);
         }
       };
 
       // Create and connect the MCP server to this transport
-      const server = createMCPServer();
+      const server = createMCPServer(newSessionId);
       await server.connect(transport);
 
       // Handle the initialize request

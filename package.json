@@ -1,22 +1,40 @@
 {
   "name": "vscode-mcp-auth-sample",
   "version": "1.0.0",
-  "description": "MCP server with OAuth 2.0 authentication using Azure as the identity provider",
+  "description": "Reference implementation of an MCP server with OAuth 2.1 PKCE authentication for VS Code using Azure AD",
   "main": "dist/server.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shiftrightlabs/vscode-mcp-auth-sample.git"
+  },
+  "bugs": {
+    "url": "https://github.com/shiftrightlabs/vscode-mcp-auth-sample/issues"
+  },
+  "homepage": "https://github.com/shiftrightlabs/vscode-mcp-auth-sample#readme",
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "ts-node src/server.ts",
-    "watch": "tsc -w"
+    "watch": "tsc -w",
+    "lint": "eslint . --ext .ts",
+    "lint:fix": "eslint . --ext .ts --fix",
+    "prepare": "husky"
   },
   "keywords": [
     "mcp",
+    "model-context-protocol",
     "oauth",
+    "oauth2",
+    "pkce",
     "azure",
+    "azure-ad",
     "authentication",
-    "model-context-protocol"
+    "vscode",
+    "microsoft-graph",
+    "reference-implementation",
+    "tutorial"
   ],
-  "author": "",
+  "author": "ShiftRight Labs",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.20.1",
@@ -25,7 +43,6 @@
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.2",
-    "jwks-rsa": "^3.1.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
@@ -33,7 +50,18 @@
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.5",
     "@types/node": "^20.10.6",
+    "@typescript-eslint/eslint-plugin": "^8.46.2",
+    "@typescript-eslint/parser": "^8.46.2",
+    "eslint": "^9.38.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
+  },
+  "lint-staged": {
+    "*.ts": [
+      "eslint --fix",
+      "git add"
+    ]
   }
 }

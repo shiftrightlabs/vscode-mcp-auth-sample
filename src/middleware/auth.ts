@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import jwksClient from 'jwks-rsa';
+import axios from 'axios';
 import { config } from '../config';
 
 /**
@@ -12,76 +12,129 @@ import { config } from '../config';
  * 3. Returns HTTP 401 for invalid or expired tokens
  * 4. Includes WWW-Authenticate header on 401 responses
  * 5. Rejects tokens not from the configured authorization server
+ *
+ * Token Validation Strategy:
+ * Microsoft Graph API tokens cannot be validated using standard JWT signature validation
+ * by third-party services. Instead, we use token introspection by calling the Microsoft
+ * Graph API directly. If the API returns user data, the token is valid.
  */
-
-// JWKS client for validating Azure AD tokens
-const client = jwksClient({
-  jwksUri: config.azure.jwksUri,
-  cache: true,
-  cacheMaxAge: 86400000, // 24 hours
-  rateLimit: true,
-  jwksRequestsPerMinute: 10,
-});
 
 /**
- * Get signing key from JWKS
+ * Cache for validated tokens to avoid repeated Graph API calls
+ * Maps token → { user: UserInfo, validUntil: timestamp }
  */
-function getKey(header: jwt.JwtHeader, callback: jwt.SigningKeyCallback) {
-  console.log('Fetching signing key for kid:', header.kid);
-  console.log('JWKS URI:', config.azure.jwksUri);
-  console.log('Token algorithm:', header.alg);
+interface TokenCacheEntry {
+  user: GraphUserInfo;
+  validUntil: number;
+}
 
-  client.getSigningKey(header.kid, (err, key) => {
-    if (err) {
-      console.error('Error fetching signing key:', err);
-      callback(err);
-      return;
+interface GraphUserInfo {
+  id: string;
+  displayName: string;
+  mail: string;
+  userPrincipalName: string;
+}
+
+const tokenCache = new Map<string, TokenCacheEntry>();
+
+// Cache cleanup interval (every 5 minutes)
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, entry] of tokenCache.entries()) {
+    if (entry.validUntil < now) {
+      tokenCache.delete(token);
     }
-    const signingKey = key?.getPublicKey();
-    console.log('Successfully retrieved signing key, length:', signingKey?.length);
-    console.log('Key preview:', signingKey?.substring(0, 100));
-    callback(null, signingKey);
-  });
+  }
+}, 5 * 60 * 1000);
+
+/**
+ * Validate token by calling Microsoft Graph API
+ * This is the recommended approach for Microsoft Graph API tokens
+ */
+async function validateTokenViaGraphAPI(token: string): Promise<GraphUserInfo> {
+  // Check cache first
+  const cached = tokenCache.get(token);
+  if (cached && cached.validUntil > Date.now()) {
+    console.log('Token validation cache hit');
+    return cached.user;
+  }
+
+  try {
+    // Call Microsoft Graph API to validate token and get user info
+    const response = await axios.get('https://graph.microsoft.com/v1.0/me', {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      timeout: 5000, // 5 second timeout
+    });
+
+    const user: GraphUserInfo = {
+      id: response.data.id,
+      displayName: response.data.displayName,
+      mail: response.data.mail || response.data.userPrincipalName,
+      userPrincipalName: response.data.userPrincipalName,
+    };
+
+    console.log('Token validated via Graph API:', {
+      userId: user.id,
+      displayName: user.displayName,
+      email: user.mail,
+    });
+
+    // Cache the validated token for 5 minutes
+    tokenCache.set(token, {
+      user,
+      validUntil: Date.now() + (5 * 60 * 1000),
+    });
+
+    return user;
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      if (error.response?.status === 401) {
+        throw new Error('Token is invalid or expired');
+      }
+      throw new Error(`Graph API validation failed: ${error.response?.status} ${error.response?.statusText}`);
+    }
+    throw error;
+  }
 }
 
 /**
- * Validate JWT token issued by Azure AD
+ * Validate token structure and basic claims
+ * This provides additional validation beyond Graph API introspection
  */
-async function validateToken(token: string): Promise<jwt.JwtPayload> {
-  return new Promise((resolve, reject) => {
-    jwt.verify(
-      token,
-      getKey,
-      {
-        // MUST verify the issuer matches our authorization server
-        // Accept both v1.0 and v2.0 issuers
-        issuer: [
-          config.azure.issuer, // v1.0: https://sts.windows.net/{tenant}/
-          `https://login.microsoftonline.com/${config.azure.tenantId}/v2.0`, // v2.0
-        ],
+function validateTokenStructure(token: string): jwt.JwtPayload {
+  const decoded = jwt.decode(token, { complete: true });
 
-        // Skip audience validation - VS Code uses its own client ID for tokens
-        // The token audience will be Microsoft Graph API, not our MCP server
-        // We validate the token is from our tenant via the issuer check above
+  if (!decoded || typeof decoded === 'string') {
+    throw new Error('Invalid token structure');
+  }
 
-        // Verify the token is not expired
-        clockTolerance: 60, // 60 seconds tolerance for clock skew
-      },
-      (err, decoded) => {
-        if (err) {
-          reject(err);
-          return;
-        }
+  const payload = decoded.payload as jwt.JwtPayload;
 
-        if (!decoded || typeof decoded === 'string') {
-          reject(new Error('Invalid token payload'));
-          return;
-        }
+  // Verify issuer is from our Azure AD tenant
+  const validIssuers = [
+    config.azure.issuer, // v1.0: https://sts.windows.net/{tenant}/
+    `https://login.microsoftonline.com/${config.azure.tenantId}/v2.0`, // v2.0
+  ];
 
-        resolve(decoded as jwt.JwtPayload);
-      }
-    );
+  if (!payload.iss || !validIssuers.some(issuer => payload.iss === issuer)) {
+    throw new Error(`Invalid issuer: ${payload.iss}`);
+  }
+
+  // Verify token is not expired
+  if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+    throw new Error('Token has expired');
+  }
+
+  console.log('Token structure validated:', {
+    issuer: payload.iss,
+    subject: payload.sub,
+    audience: payload.aud,
+    expiresAt: payload.exp ? new Date(payload.exp * 1000).toISOString() : 'N/A',
   });
+
+  return payload;
 }
 
 /**
@@ -90,9 +143,14 @@ async function validateToken(token: string): Promise<jwt.JwtPayload> {
  * MUST requirements implemented:
  * - Parse Authorization header with Bearer token (OAuth 2.1 Section 5.1.1)
  * - Validate access tokens per OAuth 2.1 Section 5.2
- * - Verify audience claim per RFC 8707
+ * - Verify tokens were issued by configured authorization server
  * - Return 401 with WWW-Authenticate header for failures
  * - Only accept tokens from configured authorization server
+ *
+ * Validation approach:
+ * 1. Validate token structure and basic JWT claims (issuer, expiration)
+ * 2. Introspect token by calling Microsoft Graph API
+ * 3. Cache validated tokens to reduce API calls
  */
 export async function requireAuth(
   req: Request,
@@ -120,31 +178,21 @@ export async function requireAuth(
   }
 
   try {
-    // First decode without verification to see what's in the token
-    const unverifiedToken = jwt.decode(token, { complete: true });
-    console.log('Raw token header:', unverifiedToken?.header);
-    console.log('Raw token payload:', unverifiedToken?.payload);
+    // Step 1: Validate token structure and basic claims (issuer, expiration)
+    const tokenPayload = validateTokenStructure(token);
 
-    // TEMPORARY: Skip signature validation to test the rest of the flow
-    // In production, you MUST validate signatures!
-    console.log('⚠️  WARNING: Signature validation is DISABLED for debugging');
-    const decoded = unverifiedToken?.payload as jwt.JwtPayload;
+    // Step 2: Validate token by calling Microsoft Graph API
+    // This is the recommended approach for Microsoft Graph API tokens
+    // which cannot be validated using standard JWT signature validation
+    const user = await validateTokenViaGraphAPI(token);
 
-    // Original validation code (commented out for debugging):
-    // const decoded = await validateToken(token);
+    console.log('✅ Token validated successfully via Graph API');
 
-    console.log('Token validated successfully:', {
-      subject: decoded.sub,
-      audience: decoded.aud,
-      issuer: decoded.iss,
-      expiresAt: new Date(decoded.exp! * 1000).toISOString(),
-    });
-
-    // Audience is already validated by jwt.verify() above
-    // The token is valid and from our Azure AD tenant
-
-    // Store user info in request for downstream handlers
-    (req as any).user = decoded;
+    // Store both JWT payload and Graph user info in request for downstream handlers
+    (req as any).user = {
+      ...tokenPayload,
+      graph: user,
+    };
 
     // Token is valid, proceed to the protected endpoint
     next();
@@ -152,10 +200,8 @@ export async function requireAuth(
     console.error('Token validation failed:', error);
 
     let errorMessage = 'Invalid or expired token';
-    if (error instanceof jwt.TokenExpiredError) {
-      errorMessage = 'Token has expired';
-    } else if (error instanceof jwt.JsonWebTokenError) {
-      errorMessage = `Token validation failed: ${error.message}`;
+    if (error instanceof Error) {
+      errorMessage = error.message;
     }
 
     // MUST return 401 for invalid or expired tokens
@@ -206,8 +252,18 @@ export async function optionalAuth(
 
   try {
     const token = authHeader.substring(7);
-    const decoded = await validateToken(token);
-    (req as any).user = decoded;
+
+    // Validate token structure and basic claims
+    const tokenPayload = validateTokenStructure(token);
+
+    // Validate via Graph API
+    const user = await validateTokenViaGraphAPI(token);
+
+    // Store user info in request
+    (req as any).user = {
+      ...tokenPayload,
+      graph: user,
+    };
   } catch (error) {
     // Invalid token, but don't block the request
     console.warn('Optional auth failed:', error);
