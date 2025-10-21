@@ -317,9 +317,18 @@ Add to your VS Code `settings.json`:
 
 ### 7. Test the Tools
 
-Try calling the tools:
+Once authenticated, you can test the MCP tools through GitHub Copilot or any AI assistant that supports MCP.
 
-**`get-user-info`** - Returns your authenticated user information:
+#### **Tool: `get-user-info`**
+
+Returns authenticated user information from the access token and Graph API.
+
+**Example prompts to trigger this tool:**
+- "Show me my authenticated user information"
+- "What are my user details from the access token?"
+- "Get my profile information from Microsoft Graph API"
+
+**Output:**
 ```json
 {
   "title": "✅ Authenticated User Information",
@@ -337,16 +346,26 @@ Try calling the tools:
   "graph_api_user": {
     "displayName": "Your Name",
     "mail": "your.email@example.com",
-    ...
+    "id": "...",
+    "userPrincipalName": "you@example.com"
   }
 }
 ```
 
-**`echo`** - Simple echo tool:
+#### **Tool: `echo`**
+
+Simple echo tool that confirms authentication and repeats your message.
+
+**Example prompts to trigger this tool:**
+- "Echo this message: Hello, MCP!"
+- "Test the echo tool with 'Authentication is working'"
+- "Can you echo back 'OAuth 2.1 PKCE is awesome'?"
+
+**Output:**
 ```
-Input: Hello, MCP!
-Output: Echo: Hello, MCP!
-✅ Authenticated via OAuth 2.0 PKCE (Public Client)
+Echo: Hello, MCP!
+
+Authenticated via OAuth 2.0 PKCE
 ```
 
 ## 📁 Project Structure
