@@ -79,6 +79,7 @@ jobs:
           mkdir -p package
           cp -r dist package/
           cp package.json package/
+          cp package-lock.json package/
           cp README.md package/
           cp LICENSE package/ 2>/dev/null || echo "No LICENSE file found"
           cd package && npm ci --omit=dev
