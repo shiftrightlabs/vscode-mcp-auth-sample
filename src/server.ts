@@ -4,6 +4,7 @@ import { config, validateConfig } from './config';
 import { metadataRouter } from './metadata';
 import { oauthRouter } from './oauth';
 import { toolsRouter } from './mcp/tools';
+import { mcpRouter } from './mcp/http-transport';
 
 /**
  * MCP Server with OAuth 2.0 Authentication
@@ -42,22 +43,9 @@ async function startServer() {
     next();
   });
 
-  // Health check endpoint
-  app.get('/', (req, res) => {
-    res.json({
-      name: 'MCP OAuth Sample Server',
-      version: '1.0.0',
-      status: 'running',
-      endpoints: {
-        metadata: '/.well-known/oauth-protected-resource',
-        authorize: '/authorize',
-        callback: '/callback',
-        tools: '/tools/list',
-        docs: '/docs',
-      },
-      message: 'MCP server with OAuth 2.0 authentication is running',
-    });
-  });
+  // Mount MCP protocol handler FIRST
+  // This handles / for MCP JSON-RPC and SSE requests from VS Code
+  app.use(mcpRouter);
 
   // Documentation endpoint
   app.get('/docs', (req, res) => {
@@ -213,7 +201,7 @@ curl -X POST http://localhost:${config.server.port}/tools/get-user-info \\
     `);
   });
 
-  // Mount routers
+  // Mount other routers (MCP router already mounted above)
   app.use(metadataRouter);  // /.well-known/oauth-protected-resource
   app.use(oauthRouter);     // /authorize, /callback
   app.use(toolsRouter);     // /tools/*
@@ -224,7 +212,10 @@ curl -X POST http://localhost:${config.server.port}/tools/get-user-info \\
       error: 'not_found',
       message: `Endpoint not found: ${req.method} ${req.path}`,
       availableEndpoints: [
-        'GET /',
+        'POST / (MCP JSON-RPC)',
+        'GET / (MCP SSE)',
+        'POST /mcp (MCP JSON-RPC)',
+        'GET /mcp (MCP SSE)',
         'GET /.well-known/oauth-protected-resource',
         'GET /authorize',
         'GET /callback',

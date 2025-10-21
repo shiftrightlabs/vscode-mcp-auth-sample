@@ -119,14 +119,17 @@ export async function requireAuth(
 
     // MUST verify audience includes this resource server
     // This ensures the token was requested specifically for this MCP server
+    // Azure AD v2.0 tokens typically have the client_id as the audience
     const audiences = Array.isArray(decoded.aud) ? decoded.aud : [decoded.aud];
     const validAudience = audiences.some(aud =>
-      aud === `api://${config.azure.clientId}` || aud === config.server.url
+      aud === config.azure.clientId || 
+      aud === `api://${config.azure.clientId}` || 
+      aud === config.server.url
     );
 
     if (!validAudience) {
       console.error('Token audience mismatch:', {
-        expected: [`api://${config.azure.clientId}`, config.server.url],
+        expected: [config.azure.clientId, `api://${config.azure.clientId}`, config.server.url],
         received: decoded.aud,
       });
       return sendUnauthorized(res, 'Token audience does not match this resource server');

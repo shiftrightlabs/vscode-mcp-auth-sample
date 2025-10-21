@@ -4,9 +4,10 @@ dotenv.config();
 
 export const config = {
   // Azure OAuth Configuration
+  // Note: This is a PUBLIC CLIENT (no client secret)
+  // Uses PKCE (Proof Key for Code Exchange) for security
   azure: {
     clientId: process.env.AZURE_CLIENT_ID || '',
-    clientSecret: process.env.AZURE_CLIENT_SECRET || '',
     tenantId: process.env.AZURE_TENANT_ID || '',
     // Azure AD OAuth endpoints
     authorizeUrl: `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/oauth2/v2.0/authorize`,
@@ -29,7 +30,6 @@ export const config = {
 export function validateConfig(): void {
   const required = [
     'AZURE_CLIENT_ID',
-    'AZURE_CLIENT_SECRET',
     'AZURE_TENANT_ID',
   ];
 
@@ -38,7 +38,8 @@ export function validateConfig(): void {
   if (missing.length > 0) {
     throw new Error(
       `Missing required environment variables: ${missing.join(', ')}\n` +
-      'Please copy .env.example to .env and fill in your Azure OAuth credentials.'
+      'Please copy .env.example to .env and fill in your Azure OAuth credentials.\n' +
+      'Note: AZURE_CLIENT_SECRET is no longer required (using PKCE for public client).'
     );
   }
 }
