@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24" height="25" viewBox="0 0 24 25" xmlns="http://www.w3.org/2000/svg">
+  <!-- Mic body -->
+  <rect x="8" y="3.5" width="8" height="12" rx="4" fill="#9ba3b4"/>
+  <!-- Support curve -->
+  <path fill="#9ba3b4" d="M6 11.5a6 6 0 0 0 12 0h-2a4 4 0 1 1-8 0H6Z"/>
+  <!-- Stem -->
+  <rect x="11" y="17.5" width="2" height="4" fill="#9ba3b4"/>
+  <!-- Base -->
+  <rect x="7" y="22.5" width="10" height="1.5" fill="#9ba3b4"/>
+</svg>
