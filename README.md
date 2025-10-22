@@ -20,7 +20,7 @@ This project demonstrates how to build a production-ready **MCP server** that ru
 
 **Deployment Model:** This server is designed to run locally (like `http://localhost:3000`). For remote server deployments, see the "How We Implement OAuth" section below.
 
-**Important Note:** VS Code uses its own client ID when obtaining tokens, not your MCP server's client ID. This means you'll receive Microsoft Graph API tokens instead of tokens scoped to your application. See "Challenge #2" below for the full explanation and solution.
+**Important Note:** VS Code uses its own hardcoded client ID (`aebc6443-996d-45c2-90f0-388ff96faa56`, defined in `extensions/microsoft-authentication/src/AADHelper.ts`) when obtaining tokens, not your MCP server's client ID. This means you'll receive Microsoft Graph API tokens instead of tokens scoped to your application. See "Challenge #2" below for the full technical explanation with source code evidence and solution.
 
 ## 📖 The Story: How Everything Works Together
 
@@ -47,27 +47,62 @@ Building a production-ready MCP server with OAuth authentication that works with
 
 **The Problem:** This is the most surprising challenge. You might expect that when VS Code authenticates users through your MCP server's OAuth flow, it would use **your MCP server's client ID** to obtain tokens. But that's not what happens.
 
-**The Surprise: VS Code Hijacks the Client ID**
+**The Surprise: VS Code Uses Its Own Client ID**
 
-Instead, VS Code uses **its own client ID** (`aebc6443-996d-45c2-90f0-388ff96faa56`) to obtain tokens, completely ignoring your MCP server's registered client ID. This means:
+Instead, VS Code uses **its own hardcoded client ID** (`aebc6443-996d-45c2-90f0-388ff96faa56`) to obtain tokens, completely ignoring your MCP server's registered client ID.
+
+**Evidence from VS Code Source Code:**
+
+This behavior is hardcoded in VS Code's Microsoft authentication extension:
+
+- **File:** `extensions/microsoft-authentication/src/AADHelper.ts` ([GitHub](https://github.com/microsoft/vscode))
+- **Constant:** `DEFAULT_CLIENT_ID = 'aebc6443-996d-45c2-90f0-388ff96faa56'`
+- **Behavior:** VS Code's `getClientId()` method uses this default unless you pass a special scope marker `VSCODE_CLIENT_ID:your-id`, which is non-standard OAuth and not what MCP servers do
+
+**How It Works:**
+
+When VS Code detects that your MCP server uses Microsoft Entra (Azure AD) for OAuth, it uses its built-in Microsoft authentication provider. This provider calls `vscode.authentication.getSession('microsoft', scopes)`, which always uses VS Code's hardcoded client ID for token requests.
+
+**Related GitHub Issues:**
+- [#115626](https://github.com/microsoft/vscode/issues/115626) - Microsoft Auth Provider should support overriding client ID
+- [#248775](https://github.com/microsoft/vscode/issues/248775) - API to map auth server to auth provider (for MCP)
+- [#252892](https://github.com/microsoft/vscode/issues/252892) - Feature: VSCode capability to register a clientId for MCP OAuth
+
+**What This Means:**
 
 1. ✅ The OAuth flow uses your MCP server's authorization endpoint
 2. ✅ The user authenticates via your Azure AD tenant
-3. ❌ **But the access token is issued for VS Code's client ID, not yours**
+3. ❌ **But the access token is issued for VS Code's application, not yours**
 4. ❌ The token audience is **Microsoft Graph API** (`00000003-0000-0000-c000-000000000000`), not your MCP server
+
+**Authentication Flow (What Actually Happens):**
+
+```
+1. MCP Server registers with: AZURE_CLIENT_ID=your-server-id
+2. VS Code detects Microsoft Entra as the IdP
+3. VS Code uses built-in Microsoft authentication provider
+4. Provider calls: authentication.getSession('microsoft', scopes)
+5. Internally uses: DEFAULT_CLIENT_ID = 'aebc6443-996d-45c2-90f0-388ff96faa56'
+6. Azure AD issues token for VS Code's application
+7. Token audience = '00000003-0000-0000-c000-000000000000' (Graph API)
+8. MCP server receives this Graph API token, not a token for your app
+```
 
 When you decode the token, you'll see:
 ```json
 {
-  "aud": "00000003-0000-0000-c000-000000000000",  // Microsoft Graph
+  "aud": "00000003-0000-0000-c000-000000000000",  // Microsoft Graph API
   "appid": "aebc6443-996d-45c2-90f0-388ff96faa56",  // VS Code's client ID
+  "iss": "https://sts.windows.net/{your-tenant}/",  // Your tenant
   "scp": "User.Read openid profile email"          // Graph API scopes
 }
 ```
 
 **Why This Matters:**
 
-These Microsoft Graph API tokens **cannot be validated using standard JWT signature validation** by third-party services - even with the correct JWKS signing keys from Azure AD. This is intentional by Microsoft to prevent Graph API tokens from being accepted by services other than Microsoft Graph.
+
+
+These Microsoft Graph API tokens (with audience `00000003-0000-0000-c000-000000000000`) **cannot be validated using standard JWT signature validation** by third-party services - even with the correct JWKS signing keys from Azure AD. This is intentional by Microsoft to prevent Graph API tokens from being misused by services other than Microsoft Graph.
 
 Most developers try the standard approach and get stuck:
 ```typescript
@@ -99,6 +134,10 @@ const response = await axios.get('https://graph.microsoft.com/v1.0/me', {
 - ✅ Catches expired or revoked tokens immediately
 - ✅ This is the **official Microsoft-recommended approach** for Graph API tokens
 - ✅ We cache validated tokens (5 min TTL) for performance
+
+**Summary:**
+
+The key insight is that VS Code doesn't use your MCP server's client ID - it uses its own hardcoded client ID (`aebc6443-996d-45c2-90f0-388ff96faa56`) to obtain Microsoft Graph API tokens. This is by design in VS Code's authentication system and is documented in multiple GitHub issues ([#115626](https://github.com/microsoft/vscode/issues/115626), [#248775](https://github.com/microsoft/vscode/issues/248775), [#252892](https://github.com/microsoft/vscode/issues/252892)). As a result, your MCP server must validate these Graph API tokens by calling the Microsoft Graph API, not by using standard JWT signature validation. This project demonstrates the correct approach.
 
 ---
 
@@ -579,11 +618,11 @@ Think of it this way: Your app registration controls **which tenant** and **whic
 
 **Q: Can I make VS Code use my MCP server's client ID instead of its own?**
 
-A: No, this is built into VS Code's MCP client implementation. VS Code always uses its own client ID (`aebc6443-996d-45c2-90f0-388ff96faa56`) when obtaining tokens. This is why you receive Microsoft Graph API tokens and must use Graph API introspection for validation.
+A: No, this is hardcoded in VS Code's Microsoft authentication extension (`extensions/microsoft-authentication/src/AADHelper.ts`). The constant `DEFAULT_CLIENT_ID = 'aebc6443-996d-45c2-90f0-388ff96faa56'` is used by default. While technically the code supports a `VSCODE_CLIENT_ID:` scope marker to override this, that's a non-standard OAuth pattern that MCP servers don't use. For more details, see [GitHub issue #115626](https://github.com/microsoft/vscode/issues/115626).
 
 **Q: Why does VS Code do this?**
 
-A: This allows VS Code to obtain tokens with Microsoft Graph API scopes (like `User.Read`) that it can use for its own features, while still authenticating users through your MCP server's OAuth flow. It's a design decision in VS Code's MCP client implementation.
+A: This allows VS Code to obtain tokens with Microsoft Graph API scopes (like `User.Read`) that it can use for its own features (like account management, settings sync, etc.), while still authenticating users through your MCP server's OAuth flow. It's a design decision that lets VS Code's built-in authentication providers work consistently across different extensions and MCP servers, but it means MCP servers must handle Graph API tokens rather than tokens scoped to their own application.
 
 **Q: Does this mean my client ID configuration is ignored?**
 
